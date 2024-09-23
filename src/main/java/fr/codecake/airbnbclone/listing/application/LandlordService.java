@@ -8,7 +8,6 @@ import fr.codecake.airbnbclone.listing.domain.Listing;
 import fr.codecake.airbnbclone.listing.mapper.ListingMapper;
 import fr.codecake.airbnbclone.listing.repository.ListingRepository;
 import fr.codecake.airbnbclone.sharedkernel.service.State;
-import fr.codecake.airbnbclone.user.application.Auth0Service;
 import fr.codecake.airbnbclone.user.application.UserService;
 import fr.codecake.airbnbclone.user.application.dto.ReadUserDTO;
 import org.springframework.stereotype.Service;
@@ -22,20 +21,18 @@ import java.util.UUID;
 public class LandlordService {
 
     private final ListingRepository listingRepository;
-
     private final ListingMapper listingMapper;
     private final UserService userService;
-    private final Auth0Service auth0Service;
     private final PictureService pictureService;
 
-    public LandlordService(ListingRepository listingRepository, ListingMapper listingMapper, UserService userService, Auth0Service auth0Service, PictureService pictureService) {
+    public LandlordService(ListingRepository listingRepository, ListingMapper listingMapper, UserService userService, PictureService pictureService) {
         this.listingRepository = listingRepository;
         this.listingMapper = listingMapper;
         this.userService = userService;
-        this.auth0Service = auth0Service;
         this.pictureService = pictureService;
     }
 
+    @Transactional
     public CreatedListingDTO create(SaveListingDTO saveListingDTO) {
         Listing newListing = listingMapper.saveListingDTOToListing(saveListingDTO);
 
@@ -46,7 +43,8 @@ public class LandlordService {
 
         pictureService.saveAll(saveListingDTO.getPictures(), savedListing);
 
-        auth0Service.addLandlordRoleToUser(userConnected);
+        // Add landlord role to user (if applicable)
+        userService.addLandlordRoleToUser(userConnected);
 
         return listingMapper.listingToCreatedListingDTO(savedListing);
     }
@@ -59,8 +57,8 @@ public class LandlordService {
 
     @Transactional
     public State<UUID, String> delete(UUID publicId, ReadUserDTO landlord) {
-        long deletedSuccessfuly = listingRepository.deleteByPublicIdAndLandlordPublicId(publicId, landlord.publicId());
-        if (deletedSuccessfuly > 0) {
+        long deletedSuccessfully = listingRepository.deleteByPublicIdAndLandlordPublicId(publicId, landlord.publicId());
+        if (deletedSuccessfully > 0) {
             return State.<UUID, String>builder().forSuccess(publicId);
         } else {
             return State.<UUID, String>builder().forUnauthorized("User not authorized to delete this listing");
@@ -68,7 +66,8 @@ public class LandlordService {
     }
 
     public Optional<ListingCreateBookingDTO> getByListingPublicId(UUID publicId) {
-        return listingRepository.findByPublicId(publicId).map(listingMapper::mapListingToListingCreateBookingDTO);
+        return listingRepository.findByPublicId(publicId)
+                .map(listingMapper::mapListingToListingCreateBookingDTO);
     }
 
     public List<DisplayCardListingDTO> getCardDisplayByListingPublicId(List<UUID> allListingPublicIDs) {

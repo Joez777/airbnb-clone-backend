@@ -1,24 +1,23 @@
 package fr.codecake.airbnbclone.user.application;
 
-import fr.codecake.airbnbclone.infrastructure.config.SecurityUtils;
 import fr.codecake.airbnbclone.user.application.dto.ReadUserDTO;
+import fr.codecake.airbnbclone.user.domain.Authority;
 import fr.codecake.airbnbclone.user.domain.User;
 import fr.codecake.airbnbclone.user.mapper.UserMapper;
 import fr.codecake.airbnbclone.user.repository.UserRepository;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.core.user.OAuth2User;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import fr.codecake.airbnbclone.infrastructure.config.SecurityUtils;
 
-import java.time.Instant;
-import java.util.Map;
+
 import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class UserService {
 
-    private static final String UPDATED_AT_KEY = "updated_at";
     private final UserRepository userRepository;
     private final UserMapper userMapper;
 
@@ -29,41 +28,33 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public ReadUserDTO getAuthenticatedUserFromSecurityContext() {
-        OAuth2User principal = (OAuth2User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        User user = SecurityUtils.mapOauth2AttributesToUser(principal.getAttributes());
-        return getByEmail(user.getEmail()).orElseThrow();
+        UserDetails principal = (UserDetails) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        String email = principal.getUsername(); // Assuming username is email
+        return getByEmail(email).orElseThrow();
     }
 
     @Transactional(readOnly = true)
     public Optional<ReadUserDTO> getByEmail(String email) {
-        Optional<User> oneByEmail = userRepository.findOneByEmail(email);
+        Optional<User> oneByEmail = userRepository.findByEmail(email);
         return oneByEmail.map(userMapper::readUserDTOToUser);
     }
 
-    public void syncWithIdp(OAuth2User oAuth2User, boolean forceResync) {
-        Map<String, Object> attributes = oAuth2User.getAttributes();
-        User user = SecurityUtils.mapOauth2AttributesToUser(attributes);
-        Optional<User> existingUser = userRepository.findOneByEmail(user.getEmail());
+    public void syncUserByEmail(String email, boolean forceResync) {
+        Optional<User> existingUser = userRepository.findByEmail(email);
         if (existingUser.isPresent()) {
-            if (attributes.get(UPDATED_AT_KEY) != null) {
-                Instant lastModifiedDate = existingUser.orElseThrow().getLastModifiedDate();
-                Instant idpModifiedDate;
-                if (attributes.get(UPDATED_AT_KEY) instanceof Instant instant) {
-                    idpModifiedDate = instant;
-                } else {
-                    idpModifiedDate = Instant.ofEpochSecond((Integer) attributes.get(UPDATED_AT_KEY));
-                }
-                if (idpModifiedDate.isAfter(lastModifiedDate) || forceResync) {
-                    updateUser(user);
-                }
+            // Update the user if needed based on forceResync flag
+            if (forceResync) {
+                User user = existingUser.get();
+                updateUser(user); // Update user details
             }
         } else {
-            userRepository.saveAndFlush(user);
+            // Handle case where user does not exist
+            // Optionally create a new user or handle accordingly
         }
     }
 
     private void updateUser(User user) {
-        Optional<User> userToUpdateOpt = userRepository.findOneByEmail(user.getEmail());
+        Optional<User> userToUpdateOpt = userRepository.findByEmail(user.getEmail());
         if (userToUpdateOpt.isPresent()) {
             User userToUpdate = userToUpdateOpt.get();
             userToUpdate.setEmail(user.getEmail());
@@ -75,9 +66,26 @@ public class UserService {
         }
     }
 
+    @Transactional(readOnly = true)
     public Optional<ReadUserDTO> getByPublicId(UUID publicId) {
-        Optional<User> oneByPublicId = userRepository.findOneByPublicId(publicId);
+        Optional<User> oneByPublicId = userRepository.findByPublicId(publicId);
         return oneByPublicId.map(userMapper::readUserDTOToUser);
     }
 
+    @Transactional
+    public void addLandlordRoleToUser(ReadUserDTO userDTO) {
+        // Fetch the user by ID
+        User user = userRepository.findByPublicId(userDTO.publicId())
+                .orElseThrow(() -> new UserException("User not found"));
+
+        // Create the landlord role if it doesn't exist
+        Authority landlordRole = new Authority();
+        landlordRole.setName(SecurityUtils.ROLE_LANDLORD);
+
+        // Check if the role is already present
+        if (!user.getAuthorities().contains(landlordRole)) {
+            user.getAuthorities().add(landlordRole);
+            userRepository.saveAndFlush(user);
+        }
+    }
 }

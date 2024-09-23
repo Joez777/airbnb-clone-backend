@@ -6,7 +6,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -19,7 +19,7 @@ public class SecurityUtils {
 
     public static final String CLAIMS_NAMESPACE = "https://www.codecake.fr/roles";
 
-    public static User mapOauth2AttributesToUser(Map<String, Object> attributes) {
+    public static User mapAttributesToUser(Map<String, Object> attributes) {
         User user = new User();
         String sub = String.valueOf(attributes.get("sub"));
 
@@ -51,7 +51,7 @@ public class SecurityUtils {
             user.setImageUrl(((String) attributes.get("picture")));
         }
 
-        if(attributes.get(CLAIMS_NAMESPACE) != null) {
+        if (attributes.get(CLAIMS_NAMESPACE) != null) {
             List<String> authoritiesRaw = (List<String>) attributes.get(CLAIMS_NAMESPACE);
             Set<Authority> authorities = authoritiesRaw.stream()
                     .map(authority -> {
@@ -76,16 +76,22 @@ public class SecurityUtils {
         return roles.stream().filter(role -> role.startsWith("ROLE_")).map(SimpleGrantedAuthority::new).toList();
     }
 
-    public static boolean hasCurrentUserAnyOfAuthorities(String ...authorities) {
+    public static boolean hasCurrentUserAnyOfAuthorities(String... authorities) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         return (authentication != null && getAuthorities(authentication)
                 .anyMatch(authority -> Arrays.asList(authorities).contains(authority)));
     }
 
     private static Stream<String> getAuthorities(Authentication authentication) {
-        Collection<? extends GrantedAuthority> authorities = authentication
-                instanceof JwtAuthenticationToken jwtAuthenticationToken ?
-                extractAuthorityFromClaims(jwtAuthenticationToken.getToken().getClaims()) : authentication.getAuthorities();
+        Collection<? extends GrantedAuthority> authorities;
+
+        // Checking if the authentication is from UsernamePasswordAuthenticationToken instead of JWT
+        if (authentication instanceof UsernamePasswordAuthenticationToken) {
+            authorities = authentication.getAuthorities();
+        } else {
+            authorities = Collections.emptyList();  // Handle other cases if needed
+        }
+
         return authorities.stream().map(GrantedAuthority::getAuthority);
     }
 }
